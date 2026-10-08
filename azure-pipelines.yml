@@ -5,9 +5,13 @@ pool:
 
 steps:
 
+# ==================================================
+# STEP 1 - Check the machine
+# ==================================================
+
 - script: |
     echo "================================="
-    echo "Azure DevOps Agent Test"
+    echo "STEP 1: CHECK UBUNTU AGENT"
     echo "================================="
 
     echo "Hostname:"
@@ -19,34 +23,122 @@ steps:
     echo "Operating System:"
     uname -a
 
-    echo "Current Directory:"
-    pwd
+    echo "Disk Space:"
+    df -h
 
-    echo "Agent Working Directory:"
-    echo "$(Agent.WorkFolder)"
+    echo "Memory:"
+    free -h
 
-  displayName: "Test Ubuntu Agent"
+  displayName: "Check Ubuntu Agent"
 
 
-- script: |
-    echo "================================="
-    echo "Tool Versions"
-    echo "================================="
-
-    git --version || true
-    docker --version || true
-    curl --version | head -1 || true
-
-  displayName: "Check Installed Tools"
-
+# ==================================================
+# STEP 2 - Update Ubuntu packages
+# ==================================================
 
 - script: |
     echo "================================="
-    echo "Agent Information"
+    echo "STEP 2: UPDATE UBUNTU"
     echo "================================="
 
-    echo "Agent Name: $(Agent.Name)"
-    echo "Agent Pool: $(Agent.Os)"
-    echo "Build ID: $(Build.BuildId)"
+    sudo apt-get update
 
-  displayName: "Display Azure DevOps Agent Information"
+  displayName: "Update Ubuntu Packages"
+
+
+# ==================================================
+# STEP 3 - Install Git
+# ==================================================
+
+- script: |
+    echo "================================="
+    echo "STEP 3: INSTALL GIT"
+    echo "================================="
+
+    if command -v git >/dev/null 2>&1
+    then
+        echo "Git is already installed."
+    else
+        echo "Installing Git..."
+        sudo apt-get install -y git
+    fi
+
+    echo "Git version:"
+    git --version
+
+  displayName: "Install Git"
+
+
+# ==================================================
+# STEP 4 - Install Docker
+# ==================================================
+
+- script: |
+    echo "================================="
+    echo "STEP 4: INSTALL DOCKER"
+    echo "================================="
+
+    if command -v docker >/dev/null 2>&1
+    then
+        echo "Docker is already installed."
+    else
+        echo "Installing Docker..."
+
+        sudo apt-get install -y docker.io
+
+        sudo systemctl enable docker
+        sudo systemctl start docker
+    fi
+
+    echo "Docker version:"
+    sudo docker --version
+
+  displayName: "Install Docker"
+
+
+# ==================================================
+# STEP 5 - Install curl
+# ==================================================
+
+- script: |
+    echo "================================="
+    echo "STEP 5: INSTALL CURL"
+    echo "================================="
+
+    if command -v curl >/dev/null 2>&1
+    then
+        echo "curl is already installed."
+    else
+        echo "Installing curl..."
+        sudo apt-get install -y curl
+    fi
+
+    echo "curl version:"
+    curl --version | head -1
+
+  displayName: "Install curl"
+
+
+# ==================================================
+# STEP 6 - Verify everything
+# ==================================================
+
+- script: |
+    echo "================================="
+    echo "STEP 6: VERIFY TOOLS"
+    echo "================================="
+
+    echo "Git:"
+    git --version
+
+    echo "Docker:"
+    sudo docker --version
+
+    echo "curl:"
+    curl --version | head -1
+
+    echo "================================="
+    echo "ALL TOOLS VERIFIED"
+    echo "================================="
+
+  displayName: "Verify Installed Tools"
