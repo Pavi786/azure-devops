@@ -1,0 +1,52 @@
+trigger: none
+
+pool:
+  name: Linux-agent
+
+steps:
+
+- script: |
+    echo "================================="
+    echo "Azure DevOps Agent Test"
+    echo "================================="
+
+    echo "Hostname:"
+    hostname
+
+    echo "Current User:"
+    whoami
+
+    echo "Operating System:"
+    uname -a
+
+    echo "Current Directory:"
+    pwd
+
+    echo "Agent Working Directory:"
+    echo "$(Agent.WorkFolder)"
+
+  displayName: "Test Ubuntu Agent"
+
+
+- script: |
+    echo "================================="
+    echo "Tool Versions"
+    echo "================================="
+
+    git --version || true
+    docker --version || true
+    curl --version | head -1 || true
+
+  displayName: "Check Installed Tools"
+
+
+- script: |
+    echo "================================="
+    echo "Agent Information"
+    echo "================================="
+
+    echo "Agent Name: $(Agent.Name)"
+    echo "Agent Pool: $(Agent.Os)"
+    echo "Build ID: $(Build.BuildId)"
+
+  displayName: "Display Azure DevOps Agent Information"
