@@ -1,4 +1,4 @@
-
+```yaml
 trigger: none
 pr: none
 
@@ -43,10 +43,7 @@ steps:
       sudo apt-get install -y docker.io
     fi
 
-    if ! sudo docker info >/dev/null 2>&1; then
-      sudo systemctl enable --now docker
-    fi
-
+    sudo systemctl enable --now docker
     sudo docker info >/dev/null
 
     echo "Docker is ready."
@@ -181,6 +178,9 @@ steps:
 
     COPY --chown=node:node server.js ./server.js
 
+    # Validate JavaScript inside the Node.js image.
+    RUN node --check server.js
+
     USER node
     EXPOSE 8080
 
@@ -196,14 +196,13 @@ steps:
     *.log
     EOF
 
-    echo "Generated source and Dockerfile."
-    node --check server.js
+    echo "Application source and Dockerfile generated."
+    echo "Node.js syntax validation will run inside Docker during the build."
   displayName: '2. Generate Application and Dockerfile'
 
 
 # ==================================================
 # 3. INSTALL AND RUN GITLEAKS
-# Scan Git history for accidental secrets
 # ==================================================
 
 - script: |
@@ -232,10 +231,10 @@ steps:
 
     cd "$(Build.SourcesDirectory)"
 
-    # Scan committed repository history.
+    # Scan repository Git history.
     gitleaks git --redact --verbose .
 
-    # Also scan the generated application and Dockerfile.
+    # Scan generated source and Dockerfile.
     gitleaks dir --redact --verbose \
       "$(Build.SourcesDirectory)/payflow-public-demo"
 
@@ -265,7 +264,7 @@ steps:
 
 # ==================================================
 # 5. TRIVY VULNERABILITY SCAN
-# Fail if HIGH or CRITICAL vulnerabilities are found
+# Fail on HIGH/CRITICAL findings, including unfixed ones
 # ==================================================
 
 - script: |
@@ -273,20 +272,21 @@ steps:
 
     echo "========== TRIVY IMAGE SCAN =========="
 
-    sudo docker pull aquasec/trivy:0.69.3
+    TRIVY_IMAGE="aquasec/trivy:0.69.3"
+
+    sudo docker pull "$TRIVY_IMAGE"
 
     sudo docker run --rm \
       -v /var/run/docker.sock:/var/run/docker.sock \
       -v "$(Build.SourcesDirectory):/work" \
-      aquasec/trivy:0.69.3 \
+      "$TRIVY_IMAGE" \
       image \
       --scanners vuln \
       --severity HIGH,CRITICAL \
-      --ignore-unfixed \
       --exit-code 1 \
       "$(IMAGE_REPOSITORY):$(IMAGE_TAG)"
 
-    echo "Security gate passed: no matching HIGH/CRITICAL findings."
+    echo "Security gate passed: no HIGH/CRITICAL vulnerabilities found."
   displayName: '5. Scan Image with Trivy'
 
 
@@ -317,7 +317,7 @@ steps:
 
 
 # ==================================================
-# 7. PUBLISH SBOM AS PIPELINE ARTIFACT
+# 7. PUBLISH SBOM ARTIFACT
 # ==================================================
 
 - task: PublishPipelineArtifact@1
@@ -369,8 +369,7 @@ steps:
 
 
 # ==================================================
-# 10. DEPLOY AND VERIFY HEALTH
-# Preserve the old container until the new one passes
+# 10. DEPLOY, HEALTH CHECK AND ROLLBACK
 # ==================================================
 
 - script: |
@@ -381,30 +380,30 @@ steps:
     NEW_NAME="$(CONTAINER_NAME)-candidate"
     OLD_NAME="$(CONTAINER_NAME)-previous"
     OLD_EXISTS=false
-    NEW_STARTED=false
 
-    # Clean up a leftover candidate from an earlier failed run.
+    # Clean up leftovers from earlier runs.
     sudo docker rm -f "$NEW_NAME" >/dev/null 2>&1 || true
 
-    # Start candidate on a temporary local-only port.
+    rollback() {
+      echo "Deployment failed; attempting rollback."
+
+      sudo docker rm -f "$(CONTAINER_NAME)" >/dev/null 2>&1 || true
+      sudo docker rm -f "$NEW_NAME" >/dev/null 2>&1 || true
+
+      if [ "$OLD_EXISTS" = "true" ]; then
+        sudo docker rename "$OLD_NAME" "$(CONTAINER_NAME)"
+        sudo docker start "$(CONTAINER_NAME)"
+        echo "Previous container restored."
+      else
+        echo "No previous container was available to restore."
+      fi
+    }
+
+    # Test the candidate on a localhost-only port.
     sudo docker run -d \
       --name "$NEW_NAME" \
       -p 127.0.0.1:18081:8080 \
       "$(IMAGE_REPOSITORY):$(IMAGE_TAG)"
-
-    NEW_STARTED=true
-
-    rollback() {
-      echo "Deployment failed; restoring previous container if available."
-
-      sudo docker rm -f "$NEW_NAME" >/dev/null 2>&1 || true
-
-      if [ "$OLD_EXISTS" = "true" ]; then
-        sudo docker rm -f "$(CONTAINER_NAME)" >/dev/null 2>&1 || true
-        sudo docker rename "$OLD_NAME" "$(CONTAINER_NAME)" || true
-        sudo docker start "$(CONTAINER_NAME)" || true
-      fi
-    }
 
     READY=false
 
@@ -425,16 +424,15 @@ steps:
 
     echo "Candidate health check passed."
 
-    # Keep previous container for rollback until candidate is healthy.
+    # Preserve the previous deployment for rollback.
     if sudo docker container inspect "$(CONTAINER_NAME)" >/dev/null 2>&1; then
       sudo docker rm -f "$OLD_NAME" >/dev/null 2>&1 || true
       sudo docker rename "$(CONTAINER_NAME)" "$OLD_NAME"
       OLD_EXISTS=true
     fi
 
-    # Stop candidate, free the public port, and start on public port.
+    # Remove the temporary candidate before deploying to the public port.
     sudo docker rm -f "$NEW_NAME"
-    NEW_STARTED=false
 
     if ! sudo docker run -d \
       --name "$(CONTAINER_NAME)" \
@@ -470,7 +468,6 @@ steps:
     echo "========== DEPLOYMENT STATUS =========="
     sudo docker ps --filter "name=$(CONTAINER_NAME)"
 
-    # The new deployment is healthy; old container can now be removed.
     if [ "$OLD_EXISTS" = "true" ]; then
       sudo docker rm -f "$OLD_NAME" >/dev/null 2>&1 || true
     fi
@@ -517,3 +514,4 @@ steps:
     echo "Docker Hub logout attempted."
   displayName: '12. Docker Hub Logout'
   condition: always()
+```
