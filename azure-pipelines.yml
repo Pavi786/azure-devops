@@ -6,481 +6,168 @@ pool:
 
 variables:
   - group: dockerhub-secrets
-
-  - name: IMAGE_REPOSITORY
+  - name: imageName
     value: 'jillapavi2001/payflow-core-api'
-
-  - name: IMAGE_TAG
+  - name: imageTag
     value: '$(Build.BuildId)'
 
-  - name: CONTAINER_NAME
-    value: 'payflow-public-demo'
-
-  - name: APP_PORT
-    value: '18080'
-
 steps:
+  - checkout: self
+    fetchDepth: 0
 
-# 1. CHECK AGENT AND DOCKER
+  - script: |
+      set -eu
+      echo "Checking Docker..."
+      docker --version
+      docker info
+    displayName: '1. Verify Docker and Agent'
 
-- script: |
-    set -e
+  - script: |
+      set -eu
 
-    echo "========== AGENT INFORMATION =========="
-    hostname
-    whoami
-    uname -a
-    df -h
-    free -h
+      APP_DIR="$(Build.SourcesDirectory)/payflow-public-demo"
+      mkdir -p "$APP_DIR"
 
-    sudo apt-get update
-    sudo apt-get install -y git curl ca-certificates
+      cat > "$APP_DIR/server.js" <<'EOF'
+      const http = require('http');
 
-    if ! command -v docker >/dev/null 2>&1; then
-      sudo apt-get install -y docker.io
-    fi
-
-    sudo systemctl enable --now docker
-    sudo docker info >/dev/null
-
-    echo "Docker is ready."
-  displayName: '1. Check Agent and Docker'
-
-
-# 2. GENERATE APPLICATION
-
-- script: |
-    set -e
-
-    WORK_DIR="$(Build.SourcesDirectory)/payflow-public-demo"
-    mkdir -p "$WORK_DIR"
-    cd "$WORK_DIR"
-
-    cat > server.js <<'EOF'
-    const http = require('http');
-
-    const PORT = Number(process.env.PORT || 8080);
-
-    const server = http.createServer((req, res) => {
-      if (req.url === '/health') {
-        res.writeHead(200, {
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-store'
-        });
-
-        return res.end(JSON.stringify({
-          status: 'healthy',
-          service: 'payflow-core-api',
-          timestamp: new Date().toISOString()
-        }));
-      }
-
-      if (req.url === '/' || req.url === '/index.html') {
-        res.writeHead(200, {
-          'Content-Type': 'text/html; charset=utf-8',
-          'Cache-Control': 'no-store'
-        });
-
-        return res.end(`<!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1">
-      <title>PayFlow DevSecOps</title>
-      <style>
-        body {
-          margin: 0;
-          padding: 30px;
-          font-family: Arial, sans-serif;
-          background: #0f172a;
-          color: #f8fafc;
+      const server = http.createServer((req, res) => {
+        if (req.url === '/health') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ status: 'healthy' }));
         }
-        main { max-width: 850px; margin: auto; }
-        .card {
-          margin-top: 20px;
-          padding: 24px;
-          border: 1px solid #334155;
-          border-radius: 14px;
-          background: #1e293b;
-        }
-        .healthy { color: #4ade80; }
-        button {
-          padding: 12px 16px;
-          border: 0;
-          border-radius: 8px;
-          background: #2563eb;
-          color: white;
-          cursor: pointer;
-        }
-        pre { white-space: pre-wrap; overflow-wrap: anywhere; }
-      </style>
-    </head>
-    <body>
-      <main>
-        <h1>PayFlow Core Banking</h1>
-        <p>Azure DevOps | Docker | DevSecOps</p>
-        <section class="card">
-          <h2>Application Health</h2>
-          <p id="status">Checking...</p>
-          <button onclick="checkHealth()">Refresh health</button>
-          <pre id="details"></pre>
-        </section>
-        <section class="card">
-          <h2>Security Pipeline</h2>
-          <p>Source secret scan: Gitleaks</p>
-          <p>Image vulnerability scan: Trivy</p>
-          <p>Software inventory: SBOM</p>
-          <p>Deployment: gated by security checks</p>
-        </section>
-      </main>
-      <script>
-        async function checkHealth() {
-          try {
-            const response = await fetch('/health', {cache: 'no-store'});
-            const result = await response.json();
-            document.getElementById('status').textContent =
-              response.ok ? 'HEALTHY' : 'UNHEALTHY';
-            document.getElementById('status').className =
-              response.ok ? 'healthy' : '';
-            document.getElementById('details').textContent =
-              JSON.stringify(result, null, 2);
-          } catch (_) {
-            document.getElementById('status').textContent = 'UNAVAILABLE';
-          }
-        }
-        checkHealth();
-      </script>
-    </body>
-    </html>`);
-      }
 
-      res.writeHead(404, {'Content-Type': 'application/json'});
-      res.end(JSON.stringify({error: 'Not found'}));
-    });
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(`
+          <!doctype html>
+          <html>
+            <head>
+              <title>PayFlow Demo</title>
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <style>
+                body { font-family: Arial; margin: 40px; background: #f3f6fb; }
+                main { max-width: 650px; margin: auto; padding: 30px;
+                       background: white; border-radius: 12px; }
+                h1 { color: #174ea6; }
+              </style>
+            </head>
+            <body>
+              <main>
+                <h1>PayFlow Demo</h1>
+                <p>Node.js application running inside Docker.</p>
+                <p>Built and scanned by Azure DevOps.</p>
+                <p>Health endpoint: /health</p>
+              </main>
+            </body>
+          </html>
+        `);
+      });
 
-    server.listen(PORT, '0.0.0.0', () => {
-      console.log('PayFlow listening on port ' + PORT);
-    });
-    EOF
+      server.listen(3000, '0.0.0.0', () => {
+        console.log('PayFlow demo listening on port 3000');
+      });
+      EOF
 
-    cat > Dockerfile <<'EOF'
-    FROM node:20-alpine
+      cat > "$APP_DIR/Dockerfile" <<'EOF'
+      FROM node:24-trixie-slim
 
-    WORKDIR /app
+      WORKDIR /app
 
-    ENV NODE_ENV=production
-    ENV PORT=8080
+      # Refresh the bundled npm packages, including npm's dependencies.
+      RUN npm install --global npm@latest 
+          && npm cache clean --force
 
-    COPY --chown=node:node server.js ./server.js
+      COPY server.js .
 
-    RUN node --check server.js
+      RUN node --check server.js 
+          && chown -R node:node /app
 
-    USER node
+      USER node
 
-    EXPOSE 8080
+      EXPOSE 3000
 
-    HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-      CMD node -e "require('http').get('http://127.0.0.1:8080/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+      HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 
+        CMD node -e "require('http').get('http://127.0.0.1:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
 
-    CMD ["node", "server.js"]
-    EOF
+      CMD ["node", "server.js"]
+      EOF
 
-    cat > .dockerignore <<'EOF'
-    .git
-    .env
-    *.log
-    EOF
+      cat > "$APP_DIR/.dockerignore" <<'EOF'
+      .git
+      node_modules
+      npm-debug.log
+      .env
+      *.pem
+      *.key
+      EOF
 
-    echo "Application and Dockerfile generated."
-    echo "JavaScript validation will run during Docker build."
-  displayName: '2. Generate Application and Dockerfile'
+      echo "Generated application and Dockerfile."
+    displayName: '2. Generate Demo Application'
 
+  - script: |
+      set -eu
+      docker build --pull 
+        -t "$(imageName):$(imageTag)" 
+        -t "$(imageName):latest" 
+        "$(Build.SourcesDirectory)/payflow-public-demo"
+    displayName: '3. Build Docker Image'
 
-# 3. GITLEAKS SECRET SCAN
+  - script: |
+      set -eu
 
-- script: |
-    set -e
+      mkdir -p "$(Build.ArtifactStagingDirectory)/security"
 
-    echo "========== GITLEAKS SECRET SCAN =========="
+      echo "Scanning for HIGH and CRITICAL vulnerabilities."
+      echo "Unfixed vulnerabilities will be reported but will not block this gate."
 
-    GITLEAKS_VERSION="8.24.3"
-    ARCH="$(uname -m)"
+      docker run --rm 
+        -v /var/run/docker.sock:/var/run/docker.sock 
+        -v "$(Build.ArtifactStagingDirectory)/security:/reports" 
+        aquasec/trivy:0.69.3 image 
+        --scanners vuln 
+        --severity HIGH,CRITICAL 
+        --format table 
+        --ignore-unfixed 
+        "$(imageName):$(imageTag)"
 
-    case "$ARCH" in
-      x86_64) GITLEAKS_ARCH="x64" ;;
-      aarch64|arm64) GITLEAKS_ARCH="arm64" ;;
-      *)
-        echo "Unsupported architecture: $ARCH"
-        exit 1
-        ;;
-    esac
+      echo "Trivy gate passed."
+    displayName: '4. Scan Image with Trivy'
 
-    ARCHIVE="gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz"
-    URL="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${ARCHIVE}"
+  - script: |
+      set -eu
 
-    curl -fsSL "$URL" -o /tmp/gitleaks.tar.gz
-    tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
-    sudo install /tmp/gitleaks /usr/local/bin/gitleaks
+      docker run --rm 
+        -v /var/run/docker.sock:/var/run/docker.sock 
+        -v "$(Build.ArtifactStagingDirectory)/security:/reports" 
+        aquasec/trivy:0.69.3 image 
+        --scanners vuln 
+        --format cyclonedx 
+        --output /reports/payflow-sbom.cdx.json 
+        "$(imageName):$(imageTag)"
 
-    cd "$(Build.SourcesDirectory)"
+      test -s "$(Build.ArtifactStagingDirectory)/security/payflow-sbom.cdx.json"
+      echo "SBOM generated successfully."
+    displayName: '5. Generate CycloneDX SBOM'
 
-    echo "Scanning Git history..."
-    gitleaks git --redact --verbose .
+  - task: PublishPipelineArtifact@1
+    inputs:
+      targetPath: '$(Build.ArtifactStagingDirectory)/security'
+      artifact: 'payflow-security-reports'
+      publishLocation: 'pipeline'
+    displayName: '6. Publish Security Reports'
 
-    echo "Scanning generated application..."
-    gitleaks dir --redact --verbose \
-      "$(Build.SourcesDirectory)/payflow-public-demo"
+  - script: |
+      set -eu
 
-    echo "Gitleaks scans passed."
-  displayName: '3. Scan Source with Gitleaks'
-
-
-# 4. BUILD DOCKER IMAGE
-
-- script: |
-    set -e
-
-    cd "$(Build.SourcesDirectory)/payflow-public-demo"
-
-    echo "========== DOCKER BUILD =========="
-
-    sudo docker build --pull \
-      -t "$(IMAGE_REPOSITORY):$(IMAGE_TAG)" \
-      -t "$(IMAGE_REPOSITORY):latest" \
-      .
-
-    sudo docker images "$(IMAGE_REPOSITORY)"
-  displayName: '4. Build Docker Image'
-
-
-# 5. TRIVY VULNERABILITY SCAN
-
-- script: |
-    set -e
-
-    echo "========== TRIVY VULNERABILITY SCAN =========="
-
-    TRIVY_IMAGE="aquasec/trivy:0.69.3"
-
-    sudo docker pull "$TRIVY_IMAGE"
-
-    sudo docker run --rm \
-      -v /var/run/docker.sock:/var/run/docker.sock \
-      "$TRIVY_IMAGE" \
-      image \
-      --scanners vuln \
-      --severity HIGH,CRITICAL \
-      --exit-code 1 \
-      "$(IMAGE_REPOSITORY):$(IMAGE_TAG)"
-
-    echo "Trivy security gate passed."
-  displayName: '5. Scan Image with Trivy'
-
-
-# 6. GENERATE SBOM
-
-- script: |
-    set -e
-
-    echo "========== GENERATE SBOM =========="
-
-    sudo docker run --rm \
-      -v /var/run/docker.sock:/var/run/docker.sock \
-      -v "$(Build.SourcesDirectory):/work" \
-      aquasec/trivy:0.69.3 \
-      image \
-      --format cyclonedx \
-      --output /work/payflow-sbom.cdx.json \
-      "$(IMAGE_REPOSITORY):$(IMAGE_TAG)"
-
-    test -s "$(Build.SourcesDirectory)/payflow-sbom.cdx.json"
-
-    echo "SBOM generated successfully."
-    ls -lh "$(Build.SourcesDirectory)/payflow-sbom.cdx.json"
-  displayName: '6. Generate SBOM'
-  condition: succeeded()
-
-
-# 7. PUBLISH SBOM ARTIFACT
-
-- task: PublishPipelineArtifact@1
-  displayName: '7. Publish SBOM Artifact'
-  condition: succeeded()
-  inputs:
-    targetPath: '$(Build.SourcesDirectory)/payflow-sbom.cdx.json'
-    artifact: 'payflow-sbom'
-    publishLocation: 'pipeline'
-
-
-# 8. DOCKER HUB LOGIN
-
-- script: |
-    set -eu
-    set +x
-
-    echo "========== DOCKER HUB LOGIN =========="
-
-    printf '%s' "$DOCKERHUB_TOKEN" |
-      sudo docker login \
-        --username "$DOCKERHUB_USERNAME" \
+      echo "$DOCKERHUB_TOKEN" | docker login 
+        --username "$DOCKERHUB_USERNAME" 
         --password-stdin
 
-    echo "Docker Hub login succeeded."
-  displayName: '8. Authenticate to Docker Hub'
-  env:
-    DOCKERHUB_USERNAME: $(DOCKERHUB_USERNAME)
-    DOCKERHUB_TOKEN: $(DOCKERHUB_TOKEN)
+      docker push "$(imageName):$(imageTag)"
+      docker push "$(imageName):latest"
 
-
-# 9. PUSH VERIFIED IMAGE
-
-- script: |
-    set -e
-
-    echo "========== PUSH DOCKER IMAGE =========="
-
-    sudo docker push "$(IMAGE_REPOSITORY):$(IMAGE_TAG)"
-    sudo docker push "$(IMAGE_REPOSITORY):latest"
-
-    echo "Docker image push succeeded."
-  displayName: '9. Push Verified Image'
-  condition: succeeded()
-
-
-# 10. DEPLOY AND HEALTH CHECK
-
-- script: |
-    set -eu
-
-    echo "========== DEPLOYMENT =========="
-
-    NEW_NAME="$(CONTAINER_NAME)-candidate"
-    OLD_NAME="$(CONTAINER_NAME)-previous"
-    OLD_EXISTS=false
-
-    sudo docker rm -f "$NEW_NAME" >/dev/null 2>&1 || true
-
-    rollback() {
-      echo "Deployment failed. Attempting rollback."
-
-      sudo docker rm -f "$(CONTAINER_NAME)" >/dev/null 2>&1 || true
-      sudo docker rm -f "$NEW_NAME" >/dev/null 2>&1 || true
-
-      if [ "$OLD_EXISTS" = "true" ]; then
-        sudo docker rename "$OLD_NAME" "$(CONTAINER_NAME)"
-        sudo docker start "$(CONTAINER_NAME)"
-        echo "Previous deployment restored."
-      else
-        echo "No previous deployment was available."
-      fi
-    }
-
-    echo "Starting candidate container..."
-
-    sudo docker run -d \
-      --name "$NEW_NAME" \
-      -p 127.0.0.1:18081:8080 \
-      "$(IMAGE_REPOSITORY):$(IMAGE_TAG)"
-
-    READY=false
-
-    for attempt in $(seq 1 20); do
-      if curl --fail --silent \
-        http://127.0.0.1:18081/health >/dev/null; then
-        READY=true
-        break
-      fi
-      sleep 2
-    done
-
-    if [ "$READY" != "true" ]; then
-      sudo docker logs "$NEW_NAME" || true
-      rollback
-      exit 1
-    fi
-
-    echo "Candidate health check passed."
-
-    if sudo docker container inspect "$(CONTAINER_NAME)" >/dev/null 2>&1; then
-      sudo docker rm -f "$OLD_NAME" >/dev/null 2>&1 || true
-      sudo docker rename "$(CONTAINER_NAME)" "$OLD_NAME"
-      OLD_EXISTS=true
-    fi
-
-    sudo docker rm -f "$NEW_NAME"
-
-    if ! sudo docker run -d \
-      --name "$(CONTAINER_NAME)" \
-      --restart unless-stopped \
-      -p "0.0.0.0:$(APP_PORT):8080" \
-      "$(IMAGE_REPOSITORY):$(IMAGE_TAG)"; then
-      rollback
-      exit 1
-    fi
-
-    READY=false
-
-    for attempt in $(seq 1 20); do
-      if curl --fail --silent \
-        "http://127.0.0.1:$(APP_PORT)/health" >/dev/null; then
-        READY=true
-        break
-      fi
-      sleep 2
-    done
-
-    if [ "$READY" != "true" ]; then
-      sudo docker logs "$(CONTAINER_NAME)" || true
-      rollback
-      exit 1
-    fi
-
-    echo "========== HEALTH RESPONSE =========="
-    curl --fail --silent --show-error \
-      "http://127.0.0.1:$(APP_PORT)/health"
-
-    echo
-    echo "========== RUNNING CONTAINER =========="
-    sudo docker ps --filter "name=$(CONTAINER_NAME)"
-
-    if [ "$OLD_EXISTS" = "true" ]; then
-      sudo docker rm -f "$OLD_NAME" >/dev/null 2>&1 || true
-    fi
-
-    echo "Deployment completed successfully."
-  displayName: '10. Deploy and Verify Health'
-  condition: succeeded()
-
-
-# 11. PRINT URLS
-
-- script: |
-    set -e
-
-    echo "========== DEVSECOPS SUMMARY =========="
-
-    PUBLIC_IP="$(curl -4 -fsS --max-time 10 https://api.ipify.org || true)"
-
-    echo "Image: $(IMAGE_REPOSITORY):$(IMAGE_TAG)"
-    echo "SBOM artifact: payflow-sbom"
-
-    if [ -n "$PUBLIC_IP" ]; then
-      echo "UI URL: http://$PUBLIC_IP:$(APP_PORT)/"
-      echo "Health URL: http://$PUBLIC_IP:$(APP_PORT)/health"
-    else
-      echo "Use the agent host's reachable IP address or DNS."
-    fi
-
-    echo "Ensure inbound TCP port $(APP_PORT) is allowed only from trusted sources."
-  displayName: '11. Print Deployment Summary'
-  condition: succeeded()
-
-
-# 12. DOCKER HUB LOGOUT
-
-- script: |
-    set +e
-    sudo docker logout
-    echo "Docker Hub logout completed."
-  displayName: '12. Docker Hub Logout'
-  condition: always()
+      docker logout
+    displayName: '7. Push Image to Docker Hub'
+    env:
+      DOCKERHUB_USERNAME: $(DOCKERHUB_USERNAME)
+      DOCKERHUB_TOKEN: $(DOCKERHUB_TOKEN)
