@@ -1,144 +1,465 @@
+
 trigger: none
+pr: none
 
 pool:
   name: Linux-agent
 
+variables:
+  - group: dockerhub-secrets
+
+  - name: IMAGE_REPOSITORY
+    value: 'jillapavi2001/payflow-core-api'
+
+  - name: IMAGE_TAG
+    value: '$(Build.BuildId)'
+
+  - name: CONTAINER_NAME
+    value: 'payflow-public-demo'
+
+  - name: APP_PORT
+    value: '18080'
+
 steps:
 
 # ==================================================
-# STEP 1 - Check the machine
+# STEP 1: CHECK THE AGENT
 # ==================================================
 
 - script: |
-    echo "================================="
-    echo "STEP 1: CHECK UBUNTU AGENT"
-    echo "================================="
+    set -e
 
-    echo "Hostname:"
+    echo "========== STEP 1: AGENT INFORMATION =========="
     hostname
-
-    echo "Current User:"
     whoami
-
-    echo "Operating System:"
     uname -a
-
-    echo "Disk Space:"
     df -h
-
-    echo "Memory:"
     free -h
-
-  displayName: "Check Ubuntu Agent"
+  displayName: '1. Check Ubuntu Agent'
 
 
 # ==================================================
-# STEP 2 - Update Ubuntu packages
+# STEP 2: INSTALL REQUIRED TOOLS
 # ==================================================
 
 - script: |
-    echo "================================="
-    echo "STEP 2: UPDATE UBUNTU"
-    echo "================================="
+    set -e
+
+    echo "========== STEP 2: INSTALL TOOLS =========="
 
     sudo apt-get update
 
-  displayName: "Update Ubuntu Packages"
+    for tool in git curl; do
+      if ! command -v "$tool" >/dev/null 2>&1; then
+        sudo apt-get install -y "$tool"
+      fi
+    done
 
-
-# ==================================================
-# STEP 3 - Install Git
-# ==================================================
-
-- script: |
-    echo "================================="
-    echo "STEP 3: INSTALL GIT"
-    echo "================================="
-
-    if command -v git >/dev/null 2>&1
-    then
-        echo "Git is already installed."
-    else
-        echo "Installing Git..."
-        sudo apt-get install -y git
+    if ! command -v docker >/dev/null 2>&1; then
+      sudo apt-get install -y docker.io
     fi
-
-    echo "Git version:"
-    git --version
-
-  displayName: "Install Git"
-
-
-# ==================================================
-# STEP 4 - Install Docker
-# ==================================================
-
-- script: |
-    echo "================================="
-    echo "STEP 4: INSTALL DOCKER"
-    echo "================================="
-
-    if command -v docker >/dev/null 2>&1
-    then
-        echo "Docker is already installed."
-    else
-        echo "Installing Docker..."
-
-        sudo apt-get install -y docker.io
-
-        sudo systemctl enable docker
-        sudo systemctl start docker
-    fi
-
-    echo "Docker version:"
-    sudo docker --version
-
-  displayName: "Install Docker"
-
-
-# ==================================================
-# STEP 5 - Install curl
-# ==================================================
-
-- script: |
-    echo "================================="
-    echo "STEP 5: INSTALL CURL"
-    echo "================================="
-
-    if command -v curl >/dev/null 2>&1
-    then
-        echo "curl is already installed."
-    else
-        echo "Installing curl..."
-        sudo apt-get install -y curl
-    fi
-
-    echo "curl version:"
-    curl --version | head -1
-
-  displayName: "Install curl"
-
-
-# ==================================================
-# STEP 6 - Verify everything
-# ==================================================
-
-- script: |
-    echo "================================="
-    echo "STEP 6: VERIFY TOOLS"
-    echo "================================="
 
     echo "Git:"
     git --version
 
+    echo "curl:"
+    curl --version | head -n 1
+
     echo "Docker:"
     sudo docker --version
+  displayName: '2. Install Required Tools'
 
-    echo "curl:"
-    curl --version | head -1
 
-    echo "================================="
-    echo "ALL TOOLS VERIFIED"
-    echo "================================="
+# ==================================================
+# STEP 3: START DOCKER
+# ==================================================
 
-  displayName: "Verify Installed Tools"
+- script: |
+    set -e
+
+    echo "========== STEP 3: START DOCKER =========="
+
+    if ! sudo docker info >/dev/null 2>&1; then
+      if command -v systemctl >/dev/null 2>&1; then
+        sudo systemctl enable --now docker
+      elif command -v service >/dev/null 2>&1; then
+        sudo service docker start
+      else
+        echo "ERROR: Cannot start Docker."
+        exit 1
+      fi
+    fi
+
+    sudo docker info >/dev/null
+    echo "Docker daemon is running."
+  displayName: '3. Start Docker'
+
+
+# ==================================================
+# STEP 4: CREATE WEB APPLICATION
+# ==================================================
+
+- script: |
+    set -e
+
+    WORK_DIR="$(Build.SourcesDirectory)/payflow-public-demo"
+
+    mkdir -p "$WORK_DIR"
+    cd "$WORK_DIR"
+
+    echo "========== STEP 4: CREATE WEB APPLICATION =========="
+
+    cat > server.js <<'EOF'
+    const http = require('http');
+
+    const PORT = Number(process.env.PORT || 8080);
+
+    const server = http.createServer((req, res) => {
+      if (req.url === '/health') {
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store'
+        });
+
+        return res.end(JSON.stringify({
+          status: 'healthy',
+          service: 'payflow-core-api',
+          timestamp: new Date().toISOString()
+        }));
+      }
+
+      if (req.url === '/' || req.url === '/index.html') {
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-store'
+        });
+
+        return res.end(`<!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>PayFlow Core Banking Demo</title>
+      <style>
+        * { box-sizing: border-box; }
+        body {
+          margin: 0;
+          font-family: Arial, sans-serif;
+          background: #0f172a;
+          color: #f8fafc;
+        }
+        header {
+          padding: 22px 7%;
+          background: #111c31;
+          border-bottom: 1px solid #334155;
+        }
+        main {
+          max-width: 1000px;
+          margin: 45px auto;
+          padding: 20px;
+        }
+        .muted { color: #94a3b8; }
+        .grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+          gap: 18px;
+          margin-top: 25px;
+        }
+        .card {
+          padding: 24px;
+          border-radius: 14px;
+          background: #1e293b;
+          border: 1px solid #334155;
+        }
+        .status {
+          color: #4ade80;
+          font-weight: bold;
+        }
+        button {
+          padding: 12px 18px;
+          background: #2563eb;
+          color: white;
+          border: 0;
+          border-radius: 8px;
+          cursor: pointer;
+        }
+        pre {
+          white-space: pre-wrap;
+          overflow-wrap: anywhere;
+          color: #bfdbfe;
+        }
+        code { color: #93c5fd; }
+        footer {
+          padding: 25px;
+          text-align: center;
+          color: #94a3b8;
+        }
+      </style>
+    </head>
+    <body>
+      <header>
+        <strong>PAYFLOW</strong>
+        <span class="muted"> / Core Banking Demo</span>
+      </header>
+
+      <main>
+        <h1>PayFlow Application Dashboard</h1>
+        <p class="muted">
+          Azure DevOps → Docker → Docker Hub → Public Web Demo
+        </p>
+
+        <div class="grid">
+          <section class="card">
+            <h3>Application Status</h3>
+            <p id="status" class="status">CHECKING...</p>
+            <p class="muted">Endpoint: <code>/health</code></p>
+            <button onclick="checkHealth()">Check health</button>
+          </section>
+
+          <section class="card">
+            <h3>Container</h3>
+            <p>Service: <code>payflow-core-api</code></p>
+            <p>Runtime: Node.js</p>
+            <p>Port: 8080 inside container</p>
+          </section>
+
+          <section class="card">
+            <h3>Build Information</h3>
+            <p>Image: Docker Hub</p>
+            <p>Tag: <code>Build ID + latest</code></p>
+            <p>Deployment: Self-hosted Ubuntu agent</p>
+          </section>
+        </div>
+
+        <section class="card" style="margin-top:20px">
+          <h3>Health Response</h3>
+          <pre id="details">Waiting for response...</pre>
+        </section>
+      </main>
+
+      <footer>PayFlow Core Banking — Demonstration only</footer>
+
+      <script>
+        async function checkHealth() {
+          const status = document.getElementById('status');
+          const details = document.getElementById('details');
+
+          try {
+            const response = await fetch('/health', { cache: 'no-store' });
+            const data = await response.json();
+
+            status.textContent = response.ok ? 'HEALTHY' : 'UNHEALTHY';
+            details.textContent = JSON.stringify(data, null, 2);
+          } catch (error) {
+            status.textContent = 'UNAVAILABLE';
+            details.textContent = 'Health endpoint could not be reached.';
+          }
+        }
+
+        checkHealth();
+      </script>
+    </body>
+    </html>`);
+      }
+
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Not found' }));
+    });
+
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log('PayFlow demo listening on port ' + PORT);
+    });
+    EOF
+
+    cat > Dockerfile <<'EOF'
+    FROM node:20-alpine
+
+    WORKDIR /app
+
+    ENV NODE_ENV=production
+    ENV PORT=8080
+
+    COPY --chown=node:node server.js ./server.js
+
+    USER node
+
+    EXPOSE 8080
+
+    HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+      CMD node -e "require('http').get('http://127.0.0.1:8080/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+
+    CMD ["node", "server.js"]
+    EOF
+
+    cat > .dockerignore <<'EOF'
+    .git
+    .env
+    *.log
+    EOF
+
+    echo "Generated application:"
+    ls -la
+    echo "Dockerfile and server.js created successfully."
+  displayName: '4. Generate Web UI and Dockerfile'
+
+
+# ==================================================
+# STEP 5: BUILD DOCKER IMAGE
+# ==================================================
+
+- script: |
+    set -e
+
+    cd "$(Build.SourcesDirectory)/payflow-public-demo"
+
+    echo "========== STEP 5: BUILD IMAGE =========="
+
+    sudo docker build --pull \
+      -t "$(IMAGE_REPOSITORY):$(IMAGE_TAG)" \
+      -t "$(IMAGE_REPOSITORY):latest" \
+      .
+
+    sudo docker images "$(IMAGE_REPOSITORY)"
+  displayName: '5. Build Docker Image'
+
+
+# ==================================================
+# STEP 6: START PERSISTENT PUBLIC WEB CONTAINER
+# ==================================================
+
+- script: |
+    set -e
+
+    echo "========== STEP 6: START WEB APPLICATION =========="
+
+    # Replace the previous demo container on repeat runs.
+    sudo docker rm -f "$(CONTAINER_NAME)" >/dev/null 2>&1 || true
+
+    sudo docker run -d \
+      --name "$(CONTAINER_NAME)" \
+      --restart unless-stopped \
+      -p "0.0.0.0:$(APP_PORT):8080" \
+      "$(IMAGE_REPOSITORY):$(IMAGE_TAG)"
+
+    echo "Waiting for application health..."
+
+    READY=false
+
+    for attempt in $(seq 1 20); do
+      if curl --fail --silent \
+        http://127.0.0.1:$(APP_PORT)/health >/dev/null; then
+        READY=true
+        break
+      fi
+      sleep 2
+    done
+
+    if [ "$READY" != "true" ]; then
+      echo "ERROR: Health check failed."
+      sudo docker logs "$(CONTAINER_NAME)"
+      exit 1
+    fi
+
+    echo "========== HEALTH RESPONSE =========="
+    curl --fail --silent --show-error \
+      http://127.0.0.1:$(APP_PORT)/health
+
+    echo
+    echo "========== WEB PAGE CHECK =========="
+
+    curl --fail --silent --show-error \
+      http://127.0.0.1:$(APP_PORT)/ > /tmp/payflow-ui.html
+
+    grep -q "PayFlow Application Dashboard" /tmp/payflow-ui.html
+
+    echo "Web page returned successfully."
+    echo "========== RUNNING CONTAINER =========="
+
+    sudo docker ps --filter "name=$(CONTAINER_NAME)"
+  displayName: '6. Deploy and Test Web UI'
+
+
+# ==================================================
+# STEP 7: LOGIN TO DOCKER HUB
+# ==================================================
+
+- script: |
+    set -eu
+    set +x
+
+    echo "========== STEP 7: DOCKER HUB LOGIN =========="
+
+    printf '%s' "$DOCKERHUB_TOKEN" |
+      sudo docker login \
+        --username "$DOCKERHUB_USERNAME" \
+        --password-stdin
+
+    echo "Docker Hub login succeeded."
+  displayName: '7. Authenticate to Docker Hub'
+  env:
+    DOCKERHUB_USERNAME: $(DOCKERHUB_USERNAME)
+    DOCKERHUB_TOKEN: $(DOCKERHUB_TOKEN)
+
+
+# ==================================================
+# STEP 8: PUSH IMAGE
+# ==================================================
+
+- script: |
+    set -e
+
+    echo "========== STEP 8: PUSH IMAGE =========="
+
+    sudo docker push "$(IMAGE_REPOSITORY):$(IMAGE_TAG)"
+    sudo docker push "$(IMAGE_REPOSITORY):latest"
+
+    echo "Image tags pushed successfully."
+  displayName: '8. Push Image to Docker Hub'
+  condition: succeeded()
+
+
+# ==================================================
+# STEP 9: LOG OUT WITHOUT STOPPING THE CONTAINER
+# ==================================================
+
+- script: |
+    set +e
+
+    echo "========== STEP 9: DOCKER HUB LOGOUT =========="
+
+    sudo docker logout
+    echo "The application container is intentionally left running."
+  displayName: '9. Docker Hub Logout'
+  condition: always()
+
+
+# ==================================================
+# STEP 10: PRINT PUBLIC URL
+# ==================================================
+
+- script: |
+    set -e
+
+    echo "========== STEP 10: ACCESS INFORMATION =========="
+
+    PUBLIC_IP="$(curl -4 -fsS --max-time 10 https://api.ipify.org || true)"
+
+    echo "Image: $(IMAGE_REPOSITORY):$(IMAGE_TAG)"
+    echo "Latest: $(IMAGE_REPOSITORY):latest"
+    echo "Local health endpoint: http://127.0.0.1:$(APP_PORT)/health"
+
+    if [ -n "$PUBLIC_IP" ]; then
+      echo "Potential public UI URL: http://$PUBLIC_IP:$(APP_PORT)/"
+      echo "Potential public health URL: http://$PUBLIC_IP:$(APP_PORT)/health"
+    else
+      echo "Could not discover a public IP automatically."
+      echo "Check the agent host public IP or DNS."
+    fi
+
+    echo
+    echo "IMPORTANT:"
+    echo "The public URL works only if the host has a reachable public IP"
+    echo "and inbound TCP port $(APP_PORT) is permitted by its firewall."
+    echo "Verify access from a different network."
+  displayName: '10. Show Access URLs'
+  condition: succeeded()
