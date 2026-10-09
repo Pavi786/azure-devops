@@ -23,91 +23,46 @@ variables:
 steps:
 
 # ==================================================
-# STEP 1: CHECK THE AGENT
+# 1. CHECK AGENT AND INSTALL DOCKER
 # ==================================================
 
 - script: |
     set -e
 
-    echo "========== STEP 1: AGENT INFORMATION =========="
+    echo "========== AGENT INFORMATION =========="
     hostname
     whoami
     uname -a
     df -h
     free -h
-  displayName: '1. Check Ubuntu Agent'
-
-
-# ==================================================
-# STEP 2: INSTALL REQUIRED TOOLS
-# ==================================================
-
-- script: |
-    set -e
-
-    echo "========== STEP 2: INSTALL TOOLS =========="
 
     sudo apt-get update
-
-    for tool in git curl; do
-      if ! command -v "$tool" >/dev/null 2>&1; then
-        sudo apt-get install -y "$tool"
-      fi
-    done
+    sudo apt-get install -y git curl ca-certificates
 
     if ! command -v docker >/dev/null 2>&1; then
       sudo apt-get install -y docker.io
     fi
 
-    echo "Git:"
-    git --version
-
-    echo "curl:"
-    curl --version | head -n 1
-
-    echo "Docker:"
-    sudo docker --version
-  displayName: '2. Install Required Tools'
-
-
-# ==================================================
-# STEP 3: START DOCKER
-# ==================================================
-
-- script: |
-    set -e
-
-    echo "========== STEP 3: START DOCKER =========="
-
     if ! sudo docker info >/dev/null 2>&1; then
-      if command -v systemctl >/dev/null 2>&1; then
-        sudo systemctl enable --now docker
-      elif command -v service >/dev/null 2>&1; then
-        sudo service docker start
-      else
-        echo "ERROR: Cannot start Docker."
-        exit 1
-      fi
+      sudo systemctl enable --now docker
     fi
 
     sudo docker info >/dev/null
-    echo "Docker daemon is running."
-  displayName: '3. Start Docker'
+
+    echo "Docker is ready."
+  displayName: '1. Check Agent and Docker'
 
 
 # ==================================================
-# STEP 4: CREATE WEB APPLICATION
+# 2. GENERATE SAMPLE APPLICATION
 # ==================================================
 
 - script: |
     set -e
 
     WORK_DIR="$(Build.SourcesDirectory)/payflow-public-demo"
-
     mkdir -p "$WORK_DIR"
     cd "$WORK_DIR"
-
-    echo "========== STEP 4: CREATE WEB APPLICATION =========="
 
     cat > server.js <<'EOF'
     const http = require('http');
@@ -139,135 +94,80 @@ steps:
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
-      <title>PayFlow Core Banking Demo</title>
+      <title>PayFlow DevSecOps</title>
       <style>
-        * { box-sizing: border-box; }
         body {
           margin: 0;
+          padding: 30px;
           font-family: Arial, sans-serif;
           background: #0f172a;
           color: #f8fafc;
         }
-        header {
-          padding: 22px 7%;
-          background: #111c31;
-          border-bottom: 1px solid #334155;
-        }
-        main {
-          max-width: 1000px;
-          margin: 45px auto;
-          padding: 20px;
-        }
-        .muted { color: #94a3b8; }
-        .grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-          gap: 18px;
-          margin-top: 25px;
-        }
+        main { max-width: 850px; margin: auto; }
         .card {
+          margin-top: 20px;
           padding: 24px;
+          border: 1px solid #334155;
           border-radius: 14px;
           background: #1e293b;
-          border: 1px solid #334155;
         }
-        .status {
-          color: #4ade80;
-          font-weight: bold;
-        }
+        .healthy { color: #4ade80; }
         button {
-          padding: 12px 18px;
-          background: #2563eb;
-          color: white;
+          padding: 12px 16px;
           border: 0;
           border-radius: 8px;
+          background: #2563eb;
+          color: white;
           cursor: pointer;
         }
-        pre {
-          white-space: pre-wrap;
-          overflow-wrap: anywhere;
-          color: #bfdbfe;
-        }
-        code { color: #93c5fd; }
-        footer {
-          padding: 25px;
-          text-align: center;
-          color: #94a3b8;
-        }
+        pre { white-space: pre-wrap; overflow-wrap: anywhere; }
       </style>
     </head>
     <body>
-      <header>
-        <strong>PAYFLOW</strong>
-        <span class="muted"> / Core Banking Demo</span>
-      </header>
-
       <main>
-        <h1>PayFlow Application Dashboard</h1>
-        <p class="muted">
-          Azure DevOps → Docker → Docker Hub → Public Web Demo
-        </p>
-
-        <div class="grid">
-          <section class="card">
-            <h3>Application Status</h3>
-            <p id="status" class="status">CHECKING...</p>
-            <p class="muted">Endpoint: <code>/health</code></p>
-            <button onclick="checkHealth()">Check health</button>
-          </section>
-
-          <section class="card">
-            <h3>Container</h3>
-            <p>Service: <code>payflow-core-api</code></p>
-            <p>Runtime: Node.js</p>
-            <p>Port: 8080 inside container</p>
-          </section>
-
-          <section class="card">
-            <h3>Build Information</h3>
-            <p>Image: Docker Hub</p>
-            <p>Tag: <code>Build ID + latest</code></p>
-            <p>Deployment: Self-hosted Ubuntu agent</p>
-          </section>
-        </div>
-
-        <section class="card" style="margin-top:20px">
-          <h3>Health Response</h3>
-          <pre id="details">Waiting for response...</pre>
+        <h1>PayFlow Core Banking</h1>
+        <p>Azure DevOps | Docker | DevSecOps</p>
+        <section class="card">
+          <h2>Application Health</h2>
+          <p id="status">Checking...</p>
+          <button onclick="checkHealth()">Refresh health</button>
+          <pre id="details"></pre>
+        </section>
+        <section class="card">
+          <h2>Security Pipeline</h2>
+          <p>Source secret scan: Gitleaks</p>
+          <p>Image vulnerability scan: Trivy</p>
+          <p>Software inventory: SBOM</p>
+          <p>Deployment: gated by security checks</p>
         </section>
       </main>
-
-      <footer>PayFlow Core Banking — Demonstration only</footer>
-
       <script>
         async function checkHealth() {
-          const status = document.getElementById('status');
-          const details = document.getElementById('details');
-
           try {
-            const response = await fetch('/health', { cache: 'no-store' });
-            const data = await response.json();
-
-            status.textContent = response.ok ? 'HEALTHY' : 'UNHEALTHY';
-            details.textContent = JSON.stringify(data, null, 2);
-          } catch (error) {
-            status.textContent = 'UNAVAILABLE';
-            details.textContent = 'Health endpoint could not be reached.';
+            const response = await fetch('/health', {cache: 'no-store'});
+            const result = await response.json();
+            document.getElementById('status').textContent =
+              response.ok ? 'HEALTHY' : 'UNHEALTHY';
+            document.getElementById('status').className =
+              response.ok ? 'healthy' : '';
+            document.getElementById('details').textContent =
+              JSON.stringify(result, null, 2);
+          } catch (_) {
+            document.getElementById('status').textContent = 'UNAVAILABLE';
           }
         }
-
         checkHealth();
       </script>
     </body>
     </html>`);
       }
 
-      res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Not found' }));
+      res.writeHead(404, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify({error: 'Not found'}));
     });
 
     server.listen(PORT, '0.0.0.0', () => {
-      console.log('PayFlow demo listening on port ' + PORT);
+      console.log('PayFlow listening on port ' + PORT);
     });
     EOF
 
@@ -282,7 +182,6 @@ steps:
     COPY --chown=node:node server.js ./server.js
 
     USER node
-
     EXPOSE 8080
 
     HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
@@ -297,14 +196,55 @@ steps:
     *.log
     EOF
 
-    echo "Generated application:"
-    ls -la
-    echo "Dockerfile and server.js created successfully."
-  displayName: '4. Generate Web UI and Dockerfile'
+    echo "Generated source and Dockerfile."
+    node --check server.js
+  displayName: '2. Generate Application and Dockerfile'
 
 
 # ==================================================
-# STEP 5: BUILD DOCKER IMAGE
+# 3. INSTALL AND RUN GITLEAKS
+# Scan Git history for accidental secrets
+# ==================================================
+
+- script: |
+    set -e
+
+    echo "========== GITLEAKS SECRET SCAN =========="
+
+    GITLEAKS_VERSION="8.24.3"
+    ARCH="$(uname -m)"
+
+    case "$ARCH" in
+      x86_64) GITLEAKS_ARCH="x64" ;;
+      aarch64|arm64) GITLEAKS_ARCH="arm64" ;;
+      *)
+        echo "Unsupported architecture: $ARCH"
+        exit 1
+        ;;
+    esac
+
+    ARCHIVE="gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz"
+    URL="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${ARCHIVE}"
+
+    curl -fsSL "$URL" -o /tmp/gitleaks.tar.gz
+    tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+    sudo install /tmp/gitleaks /usr/local/bin/gitleaks
+
+    cd "$(Build.SourcesDirectory)"
+
+    # Scan committed repository history.
+    gitleaks git --redact --verbose .
+
+    # Also scan the generated application and Dockerfile.
+    gitleaks dir --redact --verbose \
+      "$(Build.SourcesDirectory)/payflow-public-demo"
+
+    echo "Gitleaks scans passed."
+  displayName: '3. Scan Source for Secrets'
+
+
+# ==================================================
+# 4. BUILD DOCKER IMAGE
 # ==================================================
 
 - script: |
@@ -312,7 +252,7 @@ steps:
 
     cd "$(Build.SourcesDirectory)/payflow-public-demo"
 
-    echo "========== STEP 5: BUILD IMAGE =========="
+    echo "========== BUILD IMAGE =========="
 
     sudo docker build --pull \
       -t "$(IMAGE_REPOSITORY):$(IMAGE_TAG)" \
@@ -320,34 +260,157 @@ steps:
       .
 
     sudo docker images "$(IMAGE_REPOSITORY)"
-  displayName: '5. Build Docker Image'
+  displayName: '4. Build Docker Image'
 
 
 # ==================================================
-# STEP 6: START PERSISTENT PUBLIC WEB CONTAINER
+# 5. TRIVY VULNERABILITY SCAN
+# Fail if HIGH or CRITICAL vulnerabilities are found
 # ==================================================
 
 - script: |
     set -e
 
-    echo "========== STEP 6: START WEB APPLICATION =========="
+    echo "========== TRIVY IMAGE SCAN =========="
 
-    # Replace the previous demo container on repeat runs.
-    sudo docker rm -f "$(CONTAINER_NAME)" >/dev/null 2>&1 || true
+    sudo docker pull aquasec/trivy:0.69.3
 
-    sudo docker run -d \
-      --name "$(CONTAINER_NAME)" \
-      --restart unless-stopped \
-      -p "0.0.0.0:$(APP_PORT):8080" \
+    sudo docker run --rm \
+      -v /var/run/docker.sock:/var/run/docker.sock \
+      -v "$(Build.SourcesDirectory):/work" \
+      aquasec/trivy:0.69.3 \
+      image \
+      --scanners vuln \
+      --severity HIGH,CRITICAL \
+      --ignore-unfixed \
+      --exit-code 1 \
       "$(IMAGE_REPOSITORY):$(IMAGE_TAG)"
 
-    echo "Waiting for application health..."
+    echo "Security gate passed: no matching HIGH/CRITICAL findings."
+  displayName: '5. Scan Image with Trivy'
+
+
+# ==================================================
+# 6. GENERATE SBOM
+# ==================================================
+
+- script: |
+    set -e
+
+    echo "========== GENERATE SBOM =========="
+
+    sudo docker run --rm \
+      -v /var/run/docker.sock:/var/run/docker.sock \
+      -v "$(Build.SourcesDirectory):/work" \
+      aquasec/trivy:0.69.3 \
+      image \
+      --format cyclonedx \
+      --output /work/payflow-sbom.cdx.json \
+      "$(IMAGE_REPOSITORY):$(IMAGE_TAG)"
+
+    test -s "$(Build.SourcesDirectory)/payflow-sbom.cdx.json"
+
+    echo "SBOM generated."
+    ls -lh "$(Build.SourcesDirectory)/payflow-sbom.cdx.json"
+  displayName: '6. Generate Software Bill of Materials'
+  condition: succeeded()
+
+
+# ==================================================
+# 7. PUBLISH SBOM AS PIPELINE ARTIFACT
+# ==================================================
+
+- task: PublishPipelineArtifact@1
+  displayName: '7. Publish SBOM Artifact'
+  condition: succeeded()
+  inputs:
+    targetPath: '$(Build.SourcesDirectory)/payflow-sbom.cdx.json'
+    artifact: 'payflow-sbom'
+    publishLocation: 'pipeline'
+
+
+# ==================================================
+# 8. LOGIN TO DOCKER HUB
+# ==================================================
+
+- script: |
+    set -eu
+    set +x
+
+    echo "========== DOCKER HUB LOGIN =========="
+
+    printf '%s' "$DOCKERHUB_TOKEN" |
+      sudo docker login \
+        --username "$DOCKERHUB_USERNAME" \
+        --password-stdin
+
+    echo "Docker Hub authentication succeeded."
+  displayName: '8. Authenticate to Docker Hub'
+  env:
+    DOCKERHUB_USERNAME: $(DOCKERHUB_USERNAME)
+    DOCKERHUB_TOKEN: $(DOCKERHUB_TOKEN)
+
+
+# ==================================================
+# 9. PUSH IMAGE ONLY AFTER SECURITY GATES PASS
+# ==================================================
+
+- script: |
+    set -e
+
+    echo "========== PUSH VERIFIED IMAGE =========="
+
+    sudo docker push "$(IMAGE_REPOSITORY):$(IMAGE_TAG)"
+    sudo docker push "$(IMAGE_REPOSITORY):latest"
+
+    echo "Image push succeeded."
+  displayName: '9. Push Verified Image'
+  condition: succeeded()
+
+
+# ==================================================
+# 10. DEPLOY AND VERIFY HEALTH
+# Preserve the old container until the new one passes
+# ==================================================
+
+- script: |
+    set -eu
+
+    echo "========== DEPLOYMENT =========="
+
+    NEW_NAME="$(CONTAINER_NAME)-candidate"
+    OLD_NAME="$(CONTAINER_NAME)-previous"
+    OLD_EXISTS=false
+    NEW_STARTED=false
+
+    # Clean up a leftover candidate from an earlier failed run.
+    sudo docker rm -f "$NEW_NAME" >/dev/null 2>&1 || true
+
+    # Start candidate on a temporary local-only port.
+    sudo docker run -d \
+      --name "$NEW_NAME" \
+      -p 127.0.0.1:18081:8080 \
+      "$(IMAGE_REPOSITORY):$(IMAGE_TAG)"
+
+    NEW_STARTED=true
+
+    rollback() {
+      echo "Deployment failed; restoring previous container if available."
+
+      sudo docker rm -f "$NEW_NAME" >/dev/null 2>&1 || true
+
+      if [ "$OLD_EXISTS" = "true" ]; then
+        sudo docker rm -f "$(CONTAINER_NAME)" >/dev/null 2>&1 || true
+        sudo docker rename "$OLD_NAME" "$(CONTAINER_NAME)" || true
+        sudo docker start "$(CONTAINER_NAME)" || true
+      fi
+    }
 
     READY=false
 
     for attempt in $(seq 1 20); do
       if curl --fail --silent \
-        http://127.0.0.1:$(APP_PORT)/health >/dev/null; then
+        http://127.0.0.1:18081/health >/dev/null; then
         READY=true
         break
       fi
@@ -355,111 +418,102 @@ steps:
     done
 
     if [ "$READY" != "true" ]; then
-      echo "ERROR: Health check failed."
-      sudo docker logs "$(CONTAINER_NAME)"
+      sudo docker logs "$NEW_NAME" || true
+      rollback
       exit 1
     fi
 
-    echo "========== HEALTH RESPONSE =========="
+    echo "Candidate health check passed."
+
+    # Keep previous container for rollback until candidate is healthy.
+    if sudo docker container inspect "$(CONTAINER_NAME)" >/dev/null 2>&1; then
+      sudo docker rm -f "$OLD_NAME" >/dev/null 2>&1 || true
+      sudo docker rename "$(CONTAINER_NAME)" "$OLD_NAME"
+      OLD_EXISTS=true
+    fi
+
+    # Stop candidate, free the public port, and start on public port.
+    sudo docker rm -f "$NEW_NAME"
+    NEW_STARTED=false
+
+    if ! sudo docker run -d \
+      --name "$(CONTAINER_NAME)" \
+      --restart unless-stopped \
+      -p "0.0.0.0:$(APP_PORT):8080" \
+      "$(IMAGE_REPOSITORY):$(IMAGE_TAG)"; then
+      rollback
+      exit 1
+    fi
+
+    READY=false
+
+    for attempt in $(seq 1 20); do
+      if curl --fail --silent \
+        "http://127.0.0.1:$(APP_PORT)/health" >/dev/null; then
+        READY=true
+        break
+      fi
+      sleep 2
+    done
+
+    if [ "$READY" != "true" ]; then
+      sudo docker logs "$(CONTAINER_NAME)" || true
+      rollback
+      exit 1
+    fi
+
+    echo "========== FINAL HEALTH RESPONSE =========="
     curl --fail --silent --show-error \
-      http://127.0.0.1:$(APP_PORT)/health
+      "http://127.0.0.1:$(APP_PORT)/health"
 
     echo
-    echo "========== WEB PAGE CHECK =========="
-
-    curl --fail --silent --show-error \
-      http://127.0.0.1:$(APP_PORT)/ > /tmp/payflow-ui.html
-
-    grep -q "PayFlow Application Dashboard" /tmp/payflow-ui.html
-
-    echo "Web page returned successfully."
-    echo "========== RUNNING CONTAINER =========="
-
+    echo "========== DEPLOYMENT STATUS =========="
     sudo docker ps --filter "name=$(CONTAINER_NAME)"
-  displayName: '6. Deploy and Test Web UI'
 
+    # The new deployment is healthy; old container can now be removed.
+    if [ "$OLD_EXISTS" = "true" ]; then
+      sudo docker rm -f "$OLD_NAME" >/dev/null 2>&1 || true
+    fi
 
-# ==================================================
-# STEP 7: LOGIN TO DOCKER HUB
-# ==================================================
-
-- script: |
-    set -eu
-    set +x
-
-    echo "========== STEP 7: DOCKER HUB LOGIN =========="
-
-    printf '%s' "$DOCKERHUB_TOKEN" |
-      sudo docker login \
-        --username "$DOCKERHUB_USERNAME" \
-        --password-stdin
-
-    echo "Docker Hub login succeeded."
-  displayName: '7. Authenticate to Docker Hub'
-  env:
-    DOCKERHUB_USERNAME: $(DOCKERHUB_USERNAME)
-    DOCKERHUB_TOKEN: $(DOCKERHUB_TOKEN)
-
-
-# ==================================================
-# STEP 8: PUSH IMAGE
-# ==================================================
-
-- script: |
-    set -e
-
-    echo "========== STEP 8: PUSH IMAGE =========="
-
-    sudo docker push "$(IMAGE_REPOSITORY):$(IMAGE_TAG)"
-    sudo docker push "$(IMAGE_REPOSITORY):latest"
-
-    echo "Image tags pushed successfully."
-  displayName: '8. Push Image to Docker Hub'
+    echo "Deployment and health verification succeeded."
+  displayName: '10. Deploy and Verify Application'
   condition: succeeded()
 
 
 # ==================================================
-# STEP 9: LOG OUT WITHOUT STOPPING THE CONTAINER
-# ==================================================
-
-- script: |
-    set +e
-
-    echo "========== STEP 9: DOCKER HUB LOGOUT =========="
-
-    sudo docker logout
-    echo "The application container is intentionally left running."
-  displayName: '9. Docker Hub Logout'
-  condition: always()
-
-
-# ==================================================
-# STEP 10: PRINT PUBLIC URL
+# 11. SHOW URLS AND SECURITY SUMMARY
 # ==================================================
 
 - script: |
     set -e
 
-    echo "========== STEP 10: ACCESS INFORMATION =========="
+    echo "========== DEVSECOPS SUMMARY =========="
 
     PUBLIC_IP="$(curl -4 -fsS --max-time 10 https://api.ipify.org || true)"
 
     echo "Image: $(IMAGE_REPOSITORY):$(IMAGE_TAG)"
-    echo "Latest: $(IMAGE_REPOSITORY):latest"
-    echo "Local health endpoint: http://127.0.0.1:$(APP_PORT)/health"
+    echo "Security scan: passed if this stage was reached"
+    echo "SBOM artifact: payflow-sbom"
 
     if [ -n "$PUBLIC_IP" ]; then
       echo "Potential public UI URL: http://$PUBLIC_IP:$(APP_PORT)/"
-      echo "Potential public health URL: http://$PUBLIC_IP:$(APP_PORT)/health"
+      echo "Health endpoint: http://$PUBLIC_IP:$(APP_PORT)/health"
     else
-      echo "Could not discover a public IP automatically."
-      echo "Check the agent host public IP or DNS."
+      echo "Use the agent host's reachable public IP or DNS."
     fi
 
-    echo
-    echo "IMPORTANT:"
-    echo "The public URL works only if the host has a reachable public IP"
-    echo "and inbound TCP port $(APP_PORT) is permitted by its firewall."
-    echo "Verify access from a different network."
-  displayName: '10. Show Access URLs'
+    echo "Public access requires inbound TCP $(APP_PORT)."
+  displayName: '11. Print Deployment Summary'
   condition: succeeded()
+
+
+# ==================================================
+# 12. LOG OUT
+# ==================================================
+
+- script: |
+    set +e
+    sudo docker logout
+    echo "Docker Hub logout attempted."
+  displayName: '12. Docker Hub Logout'
+  condition: always()
