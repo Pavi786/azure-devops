@@ -1,4 +1,3 @@
-```yaml
 trigger: none
 pr: none
 
@@ -22,9 +21,7 @@ variables:
 
 steps:
 
-# ==================================================
-# 1. CHECK AGENT AND INSTALL DOCKER
-# ==================================================
+# 1. CHECK AGENT AND DOCKER
 
 - script: |
     set -e
@@ -50,9 +47,7 @@ steps:
   displayName: '1. Check Agent and Docker'
 
 
-# ==================================================
-# 2. GENERATE SAMPLE APPLICATION
-# ==================================================
+# 2. GENERATE APPLICATION
 
 - script: |
     set -e
@@ -178,10 +173,10 @@ steps:
 
     COPY --chown=node:node server.js ./server.js
 
-    # Validate JavaScript inside the Node.js image.
     RUN node --check server.js
 
     USER node
+
     EXPOSE 8080
 
     HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
@@ -196,14 +191,12 @@ steps:
     *.log
     EOF
 
-    echo "Application source and Dockerfile generated."
-    echo "Node.js syntax validation will run inside Docker during the build."
+    echo "Application and Dockerfile generated."
+    echo "JavaScript validation will run during Docker build."
   displayName: '2. Generate Application and Dockerfile'
 
 
-# ==================================================
-# 3. INSTALL AND RUN GITLEAKS
-# ==================================================
+# 3. GITLEAKS SECRET SCAN
 
 - script: |
     set -e
@@ -231,27 +224,25 @@ steps:
 
     cd "$(Build.SourcesDirectory)"
 
-    # Scan repository Git history.
+    echo "Scanning Git history..."
     gitleaks git --redact --verbose .
 
-    # Scan generated source and Dockerfile.
+    echo "Scanning generated application..."
     gitleaks dir --redact --verbose \
       "$(Build.SourcesDirectory)/payflow-public-demo"
 
     echo "Gitleaks scans passed."
-  displayName: '3. Scan Source for Secrets'
+  displayName: '3. Scan Source with Gitleaks'
 
 
-# ==================================================
 # 4. BUILD DOCKER IMAGE
-# ==================================================
 
 - script: |
     set -e
 
     cd "$(Build.SourcesDirectory)/payflow-public-demo"
 
-    echo "========== BUILD IMAGE =========="
+    echo "========== DOCKER BUILD =========="
 
     sudo docker build --pull \
       -t "$(IMAGE_REPOSITORY):$(IMAGE_TAG)" \
@@ -262,15 +253,12 @@ steps:
   displayName: '4. Build Docker Image'
 
 
-# ==================================================
 # 5. TRIVY VULNERABILITY SCAN
-# Fail on HIGH/CRITICAL findings, including unfixed ones
-# ==================================================
 
 - script: |
     set -e
 
-    echo "========== TRIVY IMAGE SCAN =========="
+    echo "========== TRIVY VULNERABILITY SCAN =========="
 
     TRIVY_IMAGE="aquasec/trivy:0.69.3"
 
@@ -278,7 +266,6 @@ steps:
 
     sudo docker run --rm \
       -v /var/run/docker.sock:/var/run/docker.sock \
-      -v "$(Build.SourcesDirectory):/work" \
       "$TRIVY_IMAGE" \
       image \
       --scanners vuln \
@@ -286,13 +273,11 @@ steps:
       --exit-code 1 \
       "$(IMAGE_REPOSITORY):$(IMAGE_TAG)"
 
-    echo "Security gate passed: no HIGH/CRITICAL vulnerabilities found."
+    echo "Trivy security gate passed."
   displayName: '5. Scan Image with Trivy'
 
 
-# ==================================================
 # 6. GENERATE SBOM
-# ==================================================
 
 - script: |
     set -e
@@ -310,15 +295,13 @@ steps:
 
     test -s "$(Build.SourcesDirectory)/payflow-sbom.cdx.json"
 
-    echo "SBOM generated."
+    echo "SBOM generated successfully."
     ls -lh "$(Build.SourcesDirectory)/payflow-sbom.cdx.json"
-  displayName: '6. Generate Software Bill of Materials'
+  displayName: '6. Generate SBOM'
   condition: succeeded()
 
 
-# ==================================================
 # 7. PUBLISH SBOM ARTIFACT
-# ==================================================
 
 - task: PublishPipelineArtifact@1
   displayName: '7. Publish SBOM Artifact'
@@ -329,9 +312,7 @@ steps:
     publishLocation: 'pipeline'
 
 
-# ==================================================
-# 8. LOGIN TO DOCKER HUB
-# ==================================================
+# 8. DOCKER HUB LOGIN
 
 - script: |
     set -eu
@@ -344,33 +325,29 @@ steps:
         --username "$DOCKERHUB_USERNAME" \
         --password-stdin
 
-    echo "Docker Hub authentication succeeded."
+    echo "Docker Hub login succeeded."
   displayName: '8. Authenticate to Docker Hub'
   env:
     DOCKERHUB_USERNAME: $(DOCKERHUB_USERNAME)
     DOCKERHUB_TOKEN: $(DOCKERHUB_TOKEN)
 
 
-# ==================================================
-# 9. PUSH IMAGE ONLY AFTER SECURITY GATES PASS
-# ==================================================
+# 9. PUSH VERIFIED IMAGE
 
 - script: |
     set -e
 
-    echo "========== PUSH VERIFIED IMAGE =========="
+    echo "========== PUSH DOCKER IMAGE =========="
 
     sudo docker push "$(IMAGE_REPOSITORY):$(IMAGE_TAG)"
     sudo docker push "$(IMAGE_REPOSITORY):latest"
 
-    echo "Image push succeeded."
+    echo "Docker image push succeeded."
   displayName: '9. Push Verified Image'
   condition: succeeded()
 
 
-# ==================================================
-# 10. DEPLOY, HEALTH CHECK AND ROLLBACK
-# ==================================================
+# 10. DEPLOY AND HEALTH CHECK
 
 - script: |
     set -eu
@@ -381,11 +358,10 @@ steps:
     OLD_NAME="$(CONTAINER_NAME)-previous"
     OLD_EXISTS=false
 
-    # Clean up leftovers from earlier runs.
     sudo docker rm -f "$NEW_NAME" >/dev/null 2>&1 || true
 
     rollback() {
-      echo "Deployment failed; attempting rollback."
+      echo "Deployment failed. Attempting rollback."
 
       sudo docker rm -f "$(CONTAINER_NAME)" >/dev/null 2>&1 || true
       sudo docker rm -f "$NEW_NAME" >/dev/null 2>&1 || true
@@ -393,13 +369,14 @@ steps:
       if [ "$OLD_EXISTS" = "true" ]; then
         sudo docker rename "$OLD_NAME" "$(CONTAINER_NAME)"
         sudo docker start "$(CONTAINER_NAME)"
-        echo "Previous container restored."
+        echo "Previous deployment restored."
       else
-        echo "No previous container was available to restore."
+        echo "No previous deployment was available."
       fi
     }
 
-    # Test the candidate on a localhost-only port.
+    echo "Starting candidate container..."
+
     sudo docker run -d \
       --name "$NEW_NAME" \
       -p 127.0.0.1:18081:8080 \
@@ -424,14 +401,12 @@ steps:
 
     echo "Candidate health check passed."
 
-    # Preserve the previous deployment for rollback.
     if sudo docker container inspect "$(CONTAINER_NAME)" >/dev/null 2>&1; then
       sudo docker rm -f "$OLD_NAME" >/dev/null 2>&1 || true
       sudo docker rename "$(CONTAINER_NAME)" "$OLD_NAME"
       OLD_EXISTS=true
     fi
 
-    # Remove the temporary candidate before deploying to the public port.
     sudo docker rm -f "$NEW_NAME"
 
     if ! sudo docker run -d \
@@ -460,26 +435,24 @@ steps:
       exit 1
     fi
 
-    echo "========== FINAL HEALTH RESPONSE =========="
+    echo "========== HEALTH RESPONSE =========="
     curl --fail --silent --show-error \
       "http://127.0.0.1:$(APP_PORT)/health"
 
     echo
-    echo "========== DEPLOYMENT STATUS =========="
+    echo "========== RUNNING CONTAINER =========="
     sudo docker ps --filter "name=$(CONTAINER_NAME)"
 
     if [ "$OLD_EXISTS" = "true" ]; then
       sudo docker rm -f "$OLD_NAME" >/dev/null 2>&1 || true
     fi
 
-    echo "Deployment and health verification succeeded."
-  displayName: '10. Deploy and Verify Application'
+    echo "Deployment completed successfully."
+  displayName: '10. Deploy and Verify Health'
   condition: succeeded()
 
 
-# ==================================================
-# 11. SHOW URLS AND SECURITY SUMMARY
-# ==================================================
+# 11. PRINT URLS
 
 - script: |
     set -e
@@ -489,29 +462,25 @@ steps:
     PUBLIC_IP="$(curl -4 -fsS --max-time 10 https://api.ipify.org || true)"
 
     echo "Image: $(IMAGE_REPOSITORY):$(IMAGE_TAG)"
-    echo "Security scan: passed if this stage was reached"
     echo "SBOM artifact: payflow-sbom"
 
     if [ -n "$PUBLIC_IP" ]; then
-      echo "Potential public UI URL: http://$PUBLIC_IP:$(APP_PORT)/"
-      echo "Health endpoint: http://$PUBLIC_IP:$(APP_PORT)/health"
+      echo "UI URL: http://$PUBLIC_IP:$(APP_PORT)/"
+      echo "Health URL: http://$PUBLIC_IP:$(APP_PORT)/health"
     else
-      echo "Use the agent host's reachable public IP or DNS."
+      echo "Use the agent host's reachable IP address or DNS."
     fi
 
-    echo "Public access requires inbound TCP $(APP_PORT)."
+    echo "Ensure inbound TCP port $(APP_PORT) is allowed only from trusted sources."
   displayName: '11. Print Deployment Summary'
   condition: succeeded()
 
 
-# ==================================================
-# 12. LOG OUT
-# ==================================================
+# 12. DOCKER HUB LOGOUT
 
 - script: |
     set +e
     sudo docker logout
-    echo "Docker Hub logout attempted."
+    echo "Docker Hub logout completed."
   displayName: '12. Docker Hub Logout'
   condition: always()
-```
