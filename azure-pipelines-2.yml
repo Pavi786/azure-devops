@@ -1,0 +1,419 @@
+trigger: none
+pr: none
+
+pool:
+  name: Linux-agent
+
+variables:
+  - group: dockerhub-secrets
+
+  - name: IMAGE_REPOSITORY
+    value: 'jillapavi2001/payflow-core-api'
+
+  - name: IMAGE_TAG
+    value: '$(Build.BuildId)'
+
+steps:
+
+# ==================================================
+# STEP 1: CHECK UBUNTU AGENT
+# ==================================================
+
+- script: |
+    set -e
+
+    echo "========== STEP 1: AGENT =========="
+    echo "Hostname:"
+    hostname
+    echo "User:"
+    whoami
+    echo "OS:"
+    uname -a
+    echo "Disk:"
+    df -h
+    echo "Memory:"
+    free -h
+  displayName: '1. Check Ubuntu Agent'
+
+
+# ==================================================
+# STEP 2: INSTALL BASIC TOOLS
+# ==================================================
+
+- script: |
+    set -e
+
+    echo "========== STEP 2: INSTALL TOOLS =========="
+
+    sudo apt-get update
+
+    for tool in git curl; do
+      if ! command -v "$tool" >/dev/null 2>&1; then
+        sudo apt-get install -y "$tool"
+      fi
+    done
+
+    if ! command -v docker >/dev/null 2>&1; then
+      sudo apt-get install -y docker.io
+    fi
+
+    git --version
+    curl --version | head -n 1
+    sudo docker --version
+  displayName: '2. Install Missing Tools'
+
+
+# ==================================================
+# STEP 3: START DOCKER
+# ==================================================
+
+- script: |
+    set -e
+
+    echo "========== STEP 3: DOCKER SERVICE =========="
+
+    if ! sudo docker info >/dev/null 2>&1; then
+      if command -v systemctl >/dev/null 2>&1; then
+        sudo systemctl enable --now docker
+      elif command -v service >/dev/null 2>&1; then
+        sudo service docker start
+      else
+        echo "ERROR: Docker service manager unavailable."
+        exit 1
+      fi
+    fi
+
+    sudo docker info >/dev/null
+    echo "Docker daemon is ready."
+  displayName: '3. Start and Verify Docker'
+
+
+# ==================================================
+# STEP 4: GENERATE SAMPLE APP, UI AND DOCKERFILE
+# ==================================================
+
+- script: |
+    set -e
+
+    cd "$(Build.SourcesDirectory)"
+
+    echo "========== STEP 4: GENERATE APPLICATION =========="
+
+    mkdir -p payflow-demo
+    cd payflow-demo
+
+    cat > server.js <<'EOF'
+    const http = require('http');
+
+    const PORT = Number(process.env.PORT || 8080);
+
+    const server = http.createServer((req, res) => {
+      if (req.url === '/health') {
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store'
+        });
+
+        return res.end(JSON.stringify({
+          status: 'healthy',
+          service: 'payflow-core-api',
+          timestamp: new Date().toISOString()
+        }));
+      }
+
+      if (req.url === '/' || req.url === '/index.html') {
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-store'
+        });
+
+        return res.end(`<!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>PayFlow Core Banking</title>
+      <style>
+        body {
+          margin: 0;
+          font-family: Arial, sans-serif;
+          background: #101827;
+          color: #f8fafc;
+        }
+        main {
+          max-width: 760px;
+          margin: 70px auto;
+          padding: 24px;
+        }
+        .card {
+          background: #1e293b;
+          border: 1px solid #334155;
+          border-radius: 16px;
+          padding: 24px;
+          margin-top: 20px;
+        }
+        .status { color: #4ade80; font-weight: bold; }
+        code { color: #93c5fd; }
+        button {
+          background: #2563eb;
+          color: white;
+          border: 0;
+          padding: 12px 18px;
+          border-radius: 8px;
+          cursor: pointer;
+        }
+        pre { white-space: pre-wrap; }
+      </style>
+    </head>
+    <body>
+      <main>
+        <h1>PayFlow Core Banking</h1>
+        <p>Azure DevOps · Docker · Docker Hub</p>
+
+        <section class="card">
+          <h2>Application Dashboard</h2>
+          <p>Service: <code>payflow-core-api</code></p>
+          <p>Health: <span class="status" id="status">Checking...</span></p>
+          <p>Endpoint: <code>/health</code></p>
+          <button onclick="checkHealth()">Check health</button>
+          <pre id="details">Waiting for health response...</pre>
+        </section>
+
+        <section class="card">
+          <h2>Container Information</h2>
+          <p>Runtime: Node.js</p>
+          <p>Container port: 8080</p>
+          <p>Run mode: Docker container</p>
+        </section>
+      </main>
+
+      <script>
+        async function checkHealth() {
+          const status = document.getElementById('status');
+          const details = document.getElementById('details');
+
+          try {
+            const response = await fetch('/health', { cache: 'no-store' });
+            const data = await response.json();
+
+            status.textContent = response.ok ? 'HEALTHY' : 'UNHEALTHY';
+            details.textContent = JSON.stringify(data, null, 2);
+          } catch (error) {
+            status.textContent = 'UNAVAILABLE';
+            details.textContent = 'Health request failed.';
+          }
+        }
+
+        checkHealth();
+      </script>
+    </body>
+    </html>`);
+      }
+
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Not found' }));
+    });
+
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log('PayFlow API listening on port ' + PORT);
+    });
+    EOF
+
+    cat > Dockerfile <<'EOF'
+    FROM node:20-alpine
+
+    WORKDIR /app
+
+    ENV NODE_ENV=production
+    ENV PORT=8080
+
+    COPY --chown=node:node server.js ./server.js
+
+    USER node
+
+    EXPOSE 8080
+
+    HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+      CMD node -e "require('http').get('http://127.0.0.1:8080/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+
+    CMD ["node", "server.js"]
+    EOF
+
+    cat > .dockerignore <<'EOF'
+    .git
+    .env
+    *.log
+    EOF
+
+    echo "Generated files:"
+    ls -la
+
+    echo "Dockerfile:"
+    cat Dockerfile
+
+    echo "Application source generated."
+  displayName: '4. Generate Sample UI, API and Dockerfile'
+
+
+# ==================================================
+# STEP 5: BUILD IMAGE
+# ==================================================
+
+- script: |
+    set -e
+
+    cd "$(Build.SourcesDirectory)/payflow-demo"
+
+    echo "========== STEP 5: BUILD IMAGE =========="
+
+    sudo docker build --pull \
+      -t "$(IMAGE_REPOSITORY):$(IMAGE_TAG)" \
+      -t "$(IMAGE_REPOSITORY):latest" \
+      .
+
+    sudo docker images "$(IMAGE_REPOSITORY)"
+  displayName: '5. Build and Tag Docker Image'
+
+
+# ==================================================
+# STEP 6: RUN CONTAINER AND TEST UI + HEALTH
+# ==================================================
+
+- script: |
+    set -eu
+
+    echo "========== STEP 6: RUN CONTAINER =========="
+
+    CONTAINER_NAME="payflow-demo-$(Build.BuildId)"
+
+    cleanup() {
+      sudo docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+    }
+    trap cleanup EXIT
+
+    sudo docker run -d \
+      --name "$CONTAINER_NAME" \
+      -p 127.0.0.1:18080:8080 \
+      "$(IMAGE_REPOSITORY):$(IMAGE_TAG)"
+
+    echo "Waiting for the application..."
+
+    READY=false
+
+    for attempt in $(seq 1 20); do
+      if curl --fail --silent \
+        http://127.0.0.1:18080/health >/dev/null; then
+        READY=true
+        break
+      fi
+      sleep 2
+    done
+
+    if [ "$READY" != "true" ]; then
+      echo "ERROR: Health check failed."
+      sudo docker logs "$CONTAINER_NAME"
+      exit 1
+    fi
+
+    echo
+    echo "========== HEALTH RESPONSE =========="
+    curl --fail --silent --show-error \
+      http://127.0.0.1:18080/health
+
+    echo
+    echo "========== UI RESPONSE CHECK =========="
+
+    curl --fail --silent --show-error \
+      http://127.0.0.1:18080/ > ui-response.html
+
+    if ! grep -q 'PayFlow Core Banking' ui-response.html; then
+      echo "ERROR: Expected UI content was not returned."
+      exit 1
+    fi
+
+    echo "UI HTML returned successfully."
+    grep -o 'PayFlow Core Banking' ui-response.html | head -n 1
+
+    echo
+    echo "========== CONTAINER STATUS =========="
+    sudo docker ps --filter "name=$CONTAINER_NAME"
+
+    echo
+    echo "Health and UI checks passed."
+  displayName: '6. Run Container and Test UI'
+
+
+# ==================================================
+# STEP 7: DOCKER HUB LOGIN
+# ==================================================
+
+- script: |
+    set -eu
+    set +x
+
+    echo "========== STEP 7: DOCKER HUB LOGIN =========="
+
+    printf '%s' "$DOCKERHUB_TOKEN" |
+      sudo docker login \
+        --username "$DOCKERHUB_USERNAME" \
+        --password-stdin
+
+    echo "Docker Hub login succeeded."
+  displayName: '7. Authenticate to Docker Hub'
+  env:
+    DOCKERHUB_USERNAME: $(DOCKERHUB_USERNAME)
+    DOCKERHUB_TOKEN: $(DOCKERHUB_TOKEN)
+
+
+# ==================================================
+# STEP 8: PUSH ONLY AFTER TESTS PASS
+# ==================================================
+
+- script: |
+    set -e
+
+    echo "========== STEP 8: PUSH IMAGE =========="
+
+    sudo docker push "$(IMAGE_REPOSITORY):$(IMAGE_TAG)"
+    sudo docker push "$(IMAGE_REPOSITORY):latest"
+
+    echo "Image push commands completed."
+  displayName: '8. Push Images to Docker Hub'
+  condition: succeeded()
+
+
+# ==================================================
+# STEP 9: LOG OUT
+# ==================================================
+
+- script: |
+    set +e
+
+    echo "========== STEP 9: LOG OUT =========="
+
+    sudo docker logout
+    echo "Docker Hub logout attempted."
+  displayName: '9. Docker Hub Logout'
+  condition: always()
+
+
+# ==================================================
+# STEP 10: FINAL SUMMARY
+# ==================================================
+
+- script: |
+    echo "========== STEP 10: BUILD SUMMARY =========="
+
+    echo "Repository: $(IMAGE_REPOSITORY)"
+    echo "Build tag: $(IMAGE_TAG)"
+    echo "Latest tag: latest"
+    echo "Application UI: /"
+    echo "Health endpoint: /health"
+
+    echo "Published image references:"
+    echo "$(IMAGE_REPOSITORY):$(IMAGE_TAG)"
+    echo "$(IMAGE_REPOSITORY):latest"
+
+    echo "Check Docker Hub to confirm published tags."
+  displayName: '10. Show Build Summary'
+  condition: succeeded()
