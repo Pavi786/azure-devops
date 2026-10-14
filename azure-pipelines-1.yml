@@ -1,26 +1,36 @@
+
 trigger: none
 pr: none
 
-pool:
-  name: Linux-agent
-
 jobs:
-- job: MavenBuild
-  displayName: 'Build Java Application'
-  steps:
-  - script: |
-      echo "Running on agent:"
-      hostname
-      whoami
-      pwd
-    displayName: 'Check Agent'
+- job: Job1
+  displayName: 'Run on maven-server'
+  pool:
+    name: Linux-agent
+    demands:
+      - AgentName -equals maven-server
 
-- job: DockerBuild
-  displayName: 'Build Docker Image'
   steps:
   - script: |
-      echo "Running on agent:"
+      echo "Running on maven-server"
       hostname
       whoami
-      pwd
-    displayName: 'Check Agent'
+      sleep 60
+      echo "Job 1 completed"
+    displayName: 'Test Agent 1'
+
+- job: Job2
+  displayName: 'Run on Maven-server-2'
+  pool:
+    name: Linux-agent
+    demands:
+      - AgentName -equals Maven-server-2
+
+  steps:
+  - script: |
+      echo "Running on Maven-server-2"
+      hostname
+      whoami
+      sleep 60
+      echo "Job 2 completed"
+    displayName: 'Test Agent 2'
