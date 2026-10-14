@@ -2,27 +2,66 @@
 trigger: none
 pr: none
 
-jobs:
-- job: Job1
-  displayName: 'Run on maven-server'
-  pool:
-    name: Linux-agent
-    demands:
-      - Agent.Name -equals maven-server
-  steps:
-  - script: |
-      echo "Expected agent: maven-server"
-      hostname
-      sleep 60
+pool:
+  name: Linux-agent
+  demands:
+    - Agent.Name -equals maven-server
 
-- job: Job2
-  displayName: 'Run on Maven-server-2'
-  pool:
-    name: Linux-agent
-    demands:
-      - Agent.Name -equals Maven-server-2
+jobs:
+- job: MavenServerTask
+  displayName: '3-Minute Linux Server Health Check'
+
   steps:
+  - checkout: none
+
   - script: |
-      echo "Expected agent: Maven-server-2"
+      set -e
+
+      echo "===================================="
+      echo "Agent: maven-server"
+      echo "Task: Linux Server Health Check"
+      echo "===================================="
+
+      echo ""
+      echo "1. Hostname"
       hostname
-      sleep 60
+
+      echo ""
+      echo "2. Current User"
+      whoami
+
+      echo ""
+      echo "3. Operating System"
+      uname -a
+
+      echo ""
+      echo "4. CPU Information"
+      nproc
+      uptime
+
+      echo ""
+      echo "5. Memory Usage"
+      free -h
+
+      echo ""
+      echo "6. Disk Usage"
+      df -h /
+
+      echo ""
+      echo "7. Docker Version"
+      docker --version || true
+
+      echo ""
+      echo "8. Monitoring server for 3 minutes"
+
+      for i in $(seq 1 18); do
+        echo "maven-server health check: $i/18"
+        date
+        sleep 10
+      done
+
+      echo ""
+      echo "maven-server health check completed!"
+
+    displayName: 'Run 3-Minute Health Check'
+
