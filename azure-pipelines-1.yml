@@ -8,29 +8,21 @@ jobs:
   pool:
     name: Linux-agent
     demands:
-      - AgentName -equals maven-server
-
+      - Agent.Name -equals maven-server
   steps:
   - script: |
-      echo "Running on maven-server"
+      echo "Expected agent: maven-server"
       hostname
-      whoami
       sleep 60
-      echo "Job 1 completed"
-    displayName: 'Test Agent 1'
 
 - job: Job2
   displayName: 'Run on Maven-server-2'
   pool:
     name: Linux-agent
     demands:
-      - AgentName -equals Maven-server-2
-
+      - Agent.Name -equals Maven-server-2
   steps:
   - script: |
-      echo "Running on Maven-server-2"
+      echo "Expected agent: Maven-server-2"
       hostname
-      whoami
       sleep 60
-      echo "Job 2 completed"
-    displayName: 'Test Agent 2'
